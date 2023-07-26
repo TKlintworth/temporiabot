@@ -1,0 +1,32 @@
+{
+  "name": "temporiabot",
+  "version": "0.1.0",
+  "description": "discordjs bot to manage the Temporia card game",
+  "main": "index.js",
+  "scripts": {
+    "test": "temptest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TKlintworth/temporiabot.git"
+  },
+  "keywords": [
+    "discordjs",
+    "discord",
+    "bot",
+    "card",
+    "game"
+  ],
+  "author": "Tristan Klintworth",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/TKlintworth/temporiabot/issues"
+  },
+  "homepage": "https://github.com/TKlintworth/temporiabot#readme",
+  "dependencies": {
+    "discord.js": "^14.11.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.45.0"
+  }
+}
