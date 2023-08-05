@@ -4,6 +4,10 @@ const cors = require('cors');
 const sharp = require('sharp');
 const multer = require('multer');
 const QRCode = require('qrcode');
+const AWS = require('aws-sdk');
+
+
+const s3 = new AWS.S3({ apiVersion: '2006-03-01' });
 
 mongoose.connect('mongodb+srv://temporia:cxK1GdgibGXy3zJp@cluster0.duwqbir.mongodb.net/?retryWrites=true&w=majority', { useNewUrlParser: true, useUnifiedTopology: true })
 	.then(() => console.log('Connected to MongoDB'))
@@ -87,30 +91,38 @@ app.post('/create-card', upload.single('image'), async (req, res) => {
 	console.log(req.file);
 	const imageBuffer = req.file.buffer;
 	console.warn('imageBuffer', imageBuffer);
-	// const qrCodeImageBuffer = 0;
-	// let qrCodeImageBuffer;
 	const qrCodeString = `${req.body.season}_${req.body.name}`;
-	// const qrCodeImage = await QRCode.toDataURL(qrCodeString);
 	const qrCodeImageBuffer = await QRCode.toBuffer(qrCodeString);
 	console.warn('qrCodeImageBuffer', qrCodeImageBuffer);
-
-	/* await QRCode.toBuffer(qrCodeString, (err, buffer) => {
-		if (err) throw err;
-		qrCodeImageBuffer = buffer;
-	}); */
 
 	try {
 		const compositeImageBuffer = await sharp(imageBuffer)
 			.composite([{ input: qrCodeImageBuffer, gravity: 'southeast' }])
 			.toBuffer();
-		res.type('image/png');
-		res.send(compositeImageBuffer);
+		// Upload the image data to S3
+		const uploadParams = {
+			Bucket: 'temporiaimages',
+			Key: `card_${req.body.name}.png`,
+			Body: compositeImageBuffer,
+		};
+		const uploadResult = await s3.upload(uploadParams).promise();
+		console.log('uploadResult', uploadResult);
+		// Save the card to the database
+		const card = new Card({
+			name: req.body.name,
+			image: uploadResult.Location,
+			frequency: req.body.frequency,
+			description: req.body.description,
+			value: req.body.value,
+			season: req.body.season,
+			cardId: req.body.cardId,
+		});
+		await card.save();
+		res.send(card);
 	} catch (error) {
 		console.error(error);
-		res.status(500).send(error);
 	}
 });
-
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => console.log(`Server running on port ${port}`));
