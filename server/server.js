@@ -5,6 +5,9 @@ const sharp = require('sharp');
 const multer = require('multer');
 const QRCode = require('qrcode');
 const AWS = require('aws-sdk');
+const jsQR = require('jsqr');
+const fs = require('fs');
+const archiver = require('archiver');
 
 
 const s3 = new AWS.S3({ apiVersion: '2006-03-01' });
@@ -67,11 +70,31 @@ const userSchema = new mongoose.Schema({
 const Card = mongoose.model('Card', cardSchema);
 const User = mongoose.model('User', userSchema);
 
+// Endpoint to retrieve an image from a url and read the qr code
+app.post('/read-qr-code', upload.single('image'), async (req, res) => {
+	// console.log('req', req);
+	// console.log('req.file:', req.file);
+	const imageBuffer = await sharp(req.file.buffer).raw().toBuffer();
+	// Convert the image buffer to a Uint8ClampedArray
+	const clampedArray = new Uint8ClampedArray(imageBuffer);
+	// const imageBuffer = await sharp(req.body.image).toBuffer();
+	const dimensions = await sharp(req.file.buffer).metadata();
+	const width = dimensions.width;
+	const height = dimensions.height;
+	console.log('dimensions:', dimensions);
+	const qrCode = await jsQR(clampedArray, width, height);
+	res.send(qrCode ? qrCode.data : 'QR code not found');
+});
 
 // GET endpoint to fetch all cards
 app.get('/cards', async (req, res) => {
 	const cards = await Card.find();
 	res.send(cards);
+});
+
+// A simple ping endpoint to test the server
+app.get('/ping', (req, res) => {
+	res.send('pong');
 });
 
 // POST endpoint to create a new card
@@ -86,43 +109,88 @@ app.get('/users', async (req, res) => {
 	res.send(users);
 });
 
-app.post('/create-card', upload.single('image'), async (req, res) => {
-	console.warn('"req.body"', req.body);
-	console.log(req.file);
-	const imageBuffer = req.file.buffer;
-	console.warn('imageBuffer', imageBuffer);
-	const qrCodeString = `${req.body.season}_${req.body.name}`;
-	const qrCodeImageBuffer = await QRCode.toBuffer(qrCodeString);
-	console.warn('qrCodeImageBuffer', qrCodeImageBuffer);
-
-	try {
-		const compositeImageBuffer = await sharp(imageBuffer)
-			.composite([{ input: qrCodeImageBuffer, gravity: 'southeast' }])
-			.toBuffer();
-		// Upload the image data to S3
-		const uploadParams = {
-			Bucket: 'temporiaimages',
-			Key: `card_${req.body.name}.png`,
-			Body: compositeImageBuffer,
-		};
-		const uploadResult = await s3.upload(uploadParams).promise();
-		console.log('uploadResult', uploadResult);
-		// Save the card to the database
-		const card = new Card({
-			name: req.body.name,
-			image: uploadResult.Location,
-			frequency: req.body.frequency,
-			description: req.body.description,
-			value: req.body.value,
-			season: req.body.season,
-			cardId: req.body.cardId,
-		});
-		await card.save();
-		res.send(card);
-	} catch (error) {
-		console.error(error);
+app.get('/get-card-id', async (req, res) => {
+	// Find the highest cardId
+	const highestCard = await Card.findOne().sort({ cardId: -1 });
+	const highestCardId = highestCard ? highestCard.cardId : null;
+	if (highestCardId === null) {
+		return res.status(500).send({ error: 'No cards found' });
+	} else {
+		res.send({ cardId: highestCardId });
 	}
 });
+
+app.post('/create-card', upload.single('image'), async (req, res) => {
+	try {
+		const quantity = parseInt(req.body.quantity);
+		const imageBuffer = req.file.buffer;
+		let uploadResult;
+		const createdImages = [];
+
+		for (let i = 0; i < quantity; i++) {
+			const currentCardId = parseInt(req.body.cardId) + i;
+			console.log('currentCardId:', currentCardId);
+			const qrCodeString = `${req.body.season}_${currentCardId}`;
+			console.log('qrCodeString:', qrCodeString);
+			const existingCard = await Card.findOne({ cardId: currentCardId });
+			if (existingCard) {
+				return res.status(400).send({ error: 'Card already exists' });
+			}
+
+			// Generate the QR code
+			const qrCodeImageBuffer = await QRCode.toBuffer(qrCodeString);
+			const compositeImageBuffer = await sharp(imageBuffer)
+				.composite([{ input: qrCodeImageBuffer, gravity: 'southeast' }])
+				.toBuffer();
+			createdImages.push(compositeImageBuffer);
+
+			// Upload the image data to S3
+			if (i === 0) {
+				const uploadParams = {
+					Bucket: 'temporiaimages',
+					Key: `card_${req.body.name}_${currentCardId}.png`,
+					Body: compositeImageBuffer,
+				};
+				uploadResult = await s3.upload(uploadParams).promise();
+				console.log('uploadResult:', uploadResult);
+			}
+
+			const card = new Card({
+				name: req.body.name,
+				image: uploadResult.Location,
+				frequency: req.body.frequency,
+				description: req.body.description,
+				value: req.body.value,
+				season: req.body.season,
+				cardId: parseInt(currentCardId),
+			});
+
+			await card.save();
+		}
+		res.app.set('images', createdImages);
+		// res.send(card);
+		res.send({ success: true, message: 'Card created successfully' });
+	} catch (error) {
+		console.error(error);
+		res.status(500).send({ error: error.message });
+	}
+});
+
+app.get('/download-images', async (req, res) => {
+	const images = res.app.get('images');
+	if (!images) {
+		return res.status(500).send({ error: 'No images found' });
+	}
+	res.set('Content-Type', 'application/zip');
+	res.set('Content-Disposition', 'attachment; filename=images.zip');
+	const zip = archiver('zip');
+	zip.pipe(res);
+	images.forEach((image, index) => {
+		zip.append(image, { name: `image_${index}.png` });
+	});
+	zip.finalize();
+});
+
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => console.log(`Server running on port ${port}`));
