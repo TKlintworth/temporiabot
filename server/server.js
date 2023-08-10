@@ -18,7 +18,7 @@ mongoose.connect('mongodb+srv://temporia:cxK1GdgibGXy3zJp@cluster0.duwqbir.mongo
 
 const app = express();
 
-const allowedOrigins = ['http://localhost:5000', 'http://temporia.s3-website-us-east-1.amazonaws.com/', 'http://localhost:5173'];
+const allowedOrigins = ['http://localhost:5000', 'http://temporia.s3-website-us-east-1.amazonaws.com', 'http://localhost:5173'];
 app.use(cors({
 	origin: function(origin, callback) {
 		if (!origin) return callback(null, true);
@@ -114,7 +114,8 @@ app.get('/get-card-id', async (req, res) => {
 	const highestCard = await Card.findOne().sort({ cardId: -1 });
 	const highestCardId = highestCard ? highestCard.cardId : null;
 	if (highestCardId === null) {
-		return res.status(500).send({ error: 'No cards found' });
+		res.send({ cardId: 0 });
+		//return res.status(500).send({ error: 'No cards found' });
 	} else {
 		res.send({ cardId: highestCardId });
 	}
