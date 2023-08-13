@@ -142,8 +142,9 @@ app.post('/create-card', upload.single('image'), async (req, res) => {
 
 			// Generate the QR code
 			const qrCodeImageBuffer = await QRCode.toBuffer(qrCodeString);
+			const resizedQrCodeImageBuffer = await sharp(qrCodeImageBuffer).resize(129, 113, { fit: 'fill' }).toBuffer();
 			const compositeImageBuffer = await sharp(imageBuffer)
-				.composite([{ input: qrCodeImageBuffer, gravity: 'southeast' }])
+				.composite([{ input: resizedQrCodeImageBuffer, top: 1445, left: 1200 }])
 				.toBuffer();
 			createdImages.push(compositeImageBuffer);
 
@@ -171,7 +172,7 @@ app.post('/create-card', upload.single('image'), async (req, res) => {
 			await card.save();
 		}
 		res.app.set('images', createdImages);
-		// res.send(card);
+
 		res.send({ success: true, message: 'Card created successfully' });
 	} catch (error) {
 		console.error(error);
