@@ -156,8 +156,6 @@ app.post('/create-card', upload.single('image'), async (req, res) => {
 				console.log('uploadResult:', uploadResult);
 			}
 
-			return;
-
 			const card = new Card({
 				name: req.body.name,
 				image: uploadResult.Location,
