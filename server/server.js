@@ -10,7 +10,9 @@ const fs = require('fs');
 const archiver = require('archiver');
 
 
-const s3 = new AWS.S3({ apiVersion: '2006-03-01' });
+const s3 = new AWS.S3({ apiVersion: '2006-03-01',
+			accessKeyId: process.env.AWS_ACCESS_ID,
+			secretAccessKey: process.env.AWS_SECRET_KEY });
 
 mongoose.connect('mongodb+srv://temporia:cxK1GdgibGXy3zJp@cluster0.duwqbir.mongodb.net/?retryWrites=true&w=majority', { useNewUrlParser: true, useUnifiedTopology: true })
 	.then(() => console.log('Connected to MongoDB'))
