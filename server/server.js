@@ -7,6 +7,8 @@ const QRCode = require('qrcode');
 const AWS = require('aws-sdk');
 const jsQR = require('jsqr');
 const fs = require('fs');
+// const png = require('png');
+// const png = require('@stevebel/png');
 const archiver = require('archiver');
 
 
@@ -32,6 +34,7 @@ app.use(cors({
 		return callback(null, true);
 	},
 }));
+
 app.use(express.json());
 
 const upload = multer({ dest: 'uploads/', storage: multer.memoryStorage() });
@@ -75,8 +78,8 @@ const User = mongoose.model('User', userSchema);
 // Endpoint to retrieve an image from a url and read the qr code
 app.post('/read-qr-code', upload.single('image'), async (req, res) => {
 	// console.log('req', req);
-	// console.log('req.file:', req.file);
-	const imageBuffer = await sharp(req.file.buffer).raw().toBuffer();
+	const imageBuffer = await sharp(req.file.buffer).ensureAlpha().raw().toBuffer();
+
 	// Convert the image buffer to a Uint8ClampedArray
 	const clampedArray = new Uint8ClampedArray(imageBuffer);
 	// const imageBuffer = await sharp(req.body.image).toBuffer();
@@ -85,7 +88,8 @@ app.post('/read-qr-code', upload.single('image'), async (req, res) => {
 	const height = dimensions.height;
 	console.log('dimensions:', dimensions);
 	const qrCode = await jsQR(clampedArray, width, height);
-	res.send(qrCode ? qrCode.data : 'QR code not found');
+	console.log('qrCode:', qrCode);
+	res.send(qrCode.data ? qrCode.data : 'QR code not found');
 });
 
 // GET endpoint to fetch all cards
