@@ -103,12 +103,48 @@ app.get('/ping', (req, res) => {
 	res.send('pong');
 });
 
-// POST endpoint to create a new card
-app.post('/cards', async (req, res) => {
-	const card = new Card(req.body);
-	await card.save();
-	res.send(card);
+// Check if card exists in the database
+app.post('/add-card', async (req, res) => {
+	const requestedId = req.body.qrCode;
+	const requestedUsername = req.body.discordUsername;
+	console.log('requestedUsername:', requestedUsername);
+	// Get type of reqestedUsername
+	console.log('typeof requestedUsername:', typeof requestedUsername);
+	// Split requestedId into season and cardId by _ delimiter
+	const splitId = requestedId.split('_');
+	const season = parseInt(splitId[0]);
+	const cardId = parseInt(splitId[1]);
+	const existingCard = await Card.findOne({ cardId : cardId, season: season });
+	// Check if the card exists
+	if (!existingCard) {
+		return res.send({ error: 'Card does not exist' });
+	}
+
+	// If the user is not in the user database/table, add them first
+	const existingUsername = await User.findOne({ discordUsername : requestedUsername });
+	if (!existingUsername) {
+		// Add the user to the database
+		const user = new User({
+			discordUsername: requestedUsername,
+			cards: [],
+		});
+		await user.save();
+	}
+
+	// If the card is in any players deck (including your own), you cannot add it to your deck
+	const cardOwned = await User.findOne({ cards: existingCard._id });
+	if (cardOwned) {
+		return res.send({ error: 'This card is already owned' });
+	}
+
+	// Add the card to the user's deck
+	const user = await User.findOne({ discordUsername : requestedUsername });
+	user.cards.push(existingCard._id);
+	await user.save();
+
+	res.send({ success: 'Card added to deck' });
 });
+
 
 app.get('/users', async (req, res) => {
 	const users = await User.find();

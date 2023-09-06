@@ -31,6 +31,7 @@ module.exports = {
 		// interaction.user is the object representing the User who ran the command
 		// interaction.member is the GuildMember object, which represents the user in the specific guild
 		const image = interaction.options.getAttachment('card');
+		const username = await interaction.user.username;
 
 		// Get the image data from the url using axios
 		const imageBuffer = await axios.get(image.url, { responseType: 'arraybuffer' });
@@ -40,15 +41,16 @@ module.exports = {
 
 		// Send the imageBuffer to our /read-qr-code endpoint
 		const qrCode = await axios.post('http://localhost:5000/read-qr-code', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-		console.log('qrCode:', qrCode.data);
-		await interaction.reply('Here is the data in the QR Code: ' + qrCode.data);
 		// We have the QR code data, which is the unique id of the card
+		const qrCodeString = qrCode.data;
+		// Get the username of the user who ran the command
 		// Check if the card exists in the card database/table
-		// If it does exist, check if ANY user has this card
-		// If the card exists, and NO user has it yet, add it to the user's deck
-		// If the user is not in the user database/table, add them first
-
-		// await interaction.reply('Hello');
-		// console.warn(qrCode.data);
+		const cardExists = await axios.post('http://localhost:5000/add-card', { qrCode: qrCodeString, discordUsername : username });
+		console.log('cardExists:', cardExists.data);
+		if (cardExists.data.success) {
+			await interaction.reply(`Card added to ${username}'s deck.`);
+		} else {
+			await interaction.reply(`Error: ${cardExists.data.error}`);
+		}
 	},
 };
