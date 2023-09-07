@@ -7,27 +7,6 @@ module.exports = {
 		.setDescription('Adds a card to the users deck.')
 		.addAttachmentOption(option => option.setName('card').setDescription('The card to add to the deck.').setRequired(true)),
 	async execute(interaction) {
-		/*
-		/add
-
-		Private command
-
-		Bot needs to take the message
-
-		Make sure that there is an image
-
-		Read the QR code to get the card identifier
-
-		season_id
-
-		**Search that the card exists in the DB**
-
-		**Make sure that another user doesn’t have the same card**
-
-		If so, add this card to the deck of the User that submitted the command
-
-		If new user, create a new User
-		*/
 		// interaction.user is the object representing the User who ran the command
 		// interaction.member is the GuildMember object, which represents the user in the specific guild
 		const image = interaction.options.getAttachment('card');
@@ -45,7 +24,8 @@ module.exports = {
 		const qrCodeString = qrCode.data;
 		// Get the username of the user who ran the command
 		// Check if the card exists in the card database/table
-		const cardExists = await axios.post('http://localhost:5000/add-card', { qrCode: qrCodeString, discordUsername : username });
+		// const cardExists = await axios.post('http://localhost:5000/add-card', { qrCode: qrCodeString, discordUsername : username });
+		const cardExists = await axios.post('http://localhost:5000/add', { qrCode: qrCodeString, discordUsername : username });
 		console.log('cardExists:', cardExists.data);
 		if (cardExists.data.success) {
 			await interaction.reply(`Card added to ${username}'s deck.`);

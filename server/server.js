@@ -10,6 +10,7 @@ const fs = require('fs');
 // const png = require('png');
 // const png = require('@stevebel/png');
 const archiver = require('archiver');
+const add = require('../commands/gameplay/add');
 
 
 const s3 = new AWS.S3({ apiVersion: '2006-03-01',
@@ -55,6 +56,25 @@ const cardSchema = new mongoose.Schema({
 		ref: 'User',
 		required: false,
 	},
+});
+
+const seasonScoresSchema = new mongoose.Schema({
+	season: Number,
+	scores: [
+		{
+			type: mongoose.Schema.Types.ObjectId,
+			ref: 'Score',
+		},
+	],
+});
+
+const scoreSchema = new mongoose.Schema({
+	user: {
+		type: mongoose.Schema.Types.ObjectId,
+		ref: 'User',
+		required: true,
+	},
+	score: Number,
 });
 
 const userSchema = new mongoose.Schema({
@@ -103,48 +123,10 @@ app.get('/ping', (req, res) => {
 	res.send('pong');
 });
 
-// Check if card exists in the database
-app.post('/add-card', async (req, res) => {
-	const requestedId = req.body.qrCode;
-	const requestedUsername = req.body.discordUsername;
-	console.log('requestedUsername:', requestedUsername);
-	// Get type of reqestedUsername
-	console.log('typeof requestedUsername:', typeof requestedUsername);
-	// Split requestedId into season and cardId by _ delimiter
-	const splitId = requestedId.split('_');
-	const season = parseInt(splitId[0]);
-	const cardId = parseInt(splitId[1]);
-	const existingCard = await Card.findOne({ cardId : cardId, season: season });
-	// Check if the card exists
-	if (!existingCard) {
-		return res.send({ error: 'Card does not exist' });
-	}
-
-	// If the user is not in the user database/table, add them first
-	const existingUsername = await User.findOne({ discordUsername : requestedUsername });
-	if (!existingUsername) {
-		// Add the user to the database
-		const user = new User({
-			discordUsername: requestedUsername,
-			cards: [],
-		});
-		await user.save();
-	}
-
-	// If the card is in any players deck (including your own), you cannot add it to your deck
-	const cardOwned = await User.findOne({ cards: existingCard._id });
-	if (cardOwned) {
-		return res.send({ error: 'This card is already owned' });
-	}
-
-	// Add the card to the user's deck
-	const user = await User.findOne({ discordUsername : requestedUsername });
-	user.cards.push(existingCard._id);
-	await user.save();
-
-	res.send({ success: 'Card added to deck' });
+app.post('/add', async (req, res) => {
+	const cardAdded = await addCard(req);
+	await res.send(cardAdded);
 });
-
 
 app.get('/users', async (req, res) => {
 	const users = await User.find();
@@ -235,6 +217,58 @@ app.get('/download-images', async (req, res) => {
 	zip.finalize();
 });
 
+app.post('/play', async (req) => {
+	// Add does some initial checks to see if the card/user exists and adds the card to the user's deck
+	addCard(req);
+
+});
+
+async function addCard(req) {
+	const requestedId = req.body.qrCode;
+	const requestedUsername = req.body.discordUsername;
+
+	// Split requestedId into season and cardId by _ delimiter
+	const splitId = requestedId.split('_');
+	const season = parseInt(splitId[0]);
+	const cardId = parseInt(splitId[1]);
+	const existingCard = await Card.findOne({ cardId : cardId, season: season });
+	// Check if the card exists
+	if (!existingCard) {
+		return ({ error: 'Card does not exist' });
+	}
+
+	// If the user is not in the user database/table, add them first
+	validateAndAddUser(requestedUsername);
+
+	// If the card is in any players deck (including your own), you cannot add it to your deck
+	const cardOwned = await User.findOne({ cards: existingCard._id });
+	if (cardOwned) {
+		return ({ error: 'This card is already owned' });
+	}
+
+	// Add the card to the user's deck
+	addCardToUserDeck(requestedUsername, existingCard);
+
+	return ({ success: 'Card added to deck' });
+}
+
+async function validateAndAddUser(username) {
+	const existingUsername = await User.findOne({ discordUsername : username });
+	if (!existingUsername) {
+		// Add the user to the database
+		const user = new User({
+			discordUsername: username,
+			cards: [],
+		});
+		await user.save();
+	}
+}
+
+async function addCardToUserDeck(username, card) {
+	const user = await User.findOne({ discordUsername : username });
+	user.cards.push(card._id);
+	await user.save();
+}
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => console.log(`Server running on port ${port}`));
