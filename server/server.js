@@ -11,6 +11,7 @@ const fs = require('fs');
 // const png = require('@stevebel/png');
 const archiver = require('archiver');
 const add = require('../commands/gameplay/add');
+let CURRENT_SEASON = 1;
 
 
 const s3 = new AWS.S3({ apiVersion: '2006-03-01',
@@ -43,7 +44,7 @@ const upload = multer({ dest: 'uploads/', storage: multer.memoryStorage() });
 const cardSchema = new mongoose.Schema({
 	name: String,
 	image: String,
-	frequency: String,
+	frequency: Object,
 	description: String,
 	value: Number,
 	season: Number,
@@ -62,20 +63,23 @@ const seasonScoresSchema = new mongoose.Schema({
 	season: Number,
 	scores: [
 		{
-			type: mongoose.Schema.Types.ObjectId,
-			ref: 'Score',
+			user: {
+				type: mongoose.Schema.Types.ObjectId,
+				ref: 'User',
+			},
+			score: Number,
 		},
 	],
 });
 
-const scoreSchema = new mongoose.Schema({
+/* const scoreSchema = new mongoose.Schema({
 	user: {
 		type: mongoose.Schema.Types.ObjectId,
 		ref: 'User',
 		required: true,
 	},
 	score: Number,
-});
+}); */
 
 const userSchema = new mongoose.Schema({
 	id: Number,
@@ -85,15 +89,22 @@ const userSchema = new mongoose.Schema({
 		unique: true,
 	},
 	cards: [
-		{
-			type: mongoose.Schema.Types.ObjectId,
-			ref: 'Card',
-		},
-	],
+        {
+            card: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: 'Card',
+            },
+            lastPlayedTimestamp: {
+                type: String,
+            },
+        },
+    ],
 });
 
 const Card = mongoose.model('Card', cardSchema);
 const User = mongoose.model('User', userSchema);
+const SeasonScores = mongoose.model('SeasonScores', seasonScoresSchema, 'season_scores');
+// const Score = mongoose.model('Score', scoreSchema);
 
 // Endpoint to retrieve an image from a url and read the qr code
 app.post('/read-qr-code', upload.single('image'), async (req, res) => {
@@ -218,11 +229,124 @@ app.get('/download-images', async (req, res) => {
 });
 
 app.post('/play', async (req) => {
-	// Add does some initial checks to see if the card/user exists and adds the card to the user's deck
-	addCard(req);
+	// Check user and card existence and ownership
+	await addCard(req);
 
+	let cardPlayable = false;
+	// Now we can play the card
+	const requestedCardQrCode = req.body.qrCode;
+	const requestedUsername = req.body.discordUsername;
+	const splitId = requestedCardQrCode.split('_');
+	const season = parseInt(splitId[0]);
+	const cardId = parseInt(splitId[1]);
+
+	const currentUser = await User.findOne({ discordUsername : requestedUsername });
+	// Grab the dates that the card is allowed to be played
+	const cardToPlay = await Card.findOne({ cardId : cardId, season: season });
+	const cardToPlayId = cardToPlay._id;
+	const cardFrequency = cardToPlay.frequency;
+	// Get the score value of the card
+	const cardValue = cardToPlay.value;
+
+	// Get the server date and time
+	const date = new Date();
+	const day = date.getDay();
+	const monthDay = date.getDate();
+	const month = date.getMonth() + 1;
+	const year = date.getFullYear();
+
+	// Format the date and time as MM/DD/YYYY, padding with 0s if necessary
+	const formattedMonthDay = monthDay < 10 ? `0${monthDay}` : monthDay;
+	const formattedMonth = month < 10 ? `0${month}` : month;
+	const formattedDate = `${formattedMonth}/${formattedMonthDay}/${year}`;
+	// const formattedDate = `${month}/${monthDay}/${year}`;
+	// Get the lastPlayedTimestamp for the card
+
+	// const lastPlayedTimestamp = currentUser.cardToPlayId.lastPlayedTimestamp;
+	let lastPlayedTimestamp;
+	currentUser.cards.forEach((card) => {
+		if (card.card.equals(cardToPlayId)) {
+			lastPlayedTimestamp = card.lastPlayedTimestamp;
+		}
+	});
+
+	// Check if the card is allowed to be played today (check the dates and also the lastPlayedTimestamp)
+	if (cardFrequency.frequency === 'daily') {
+		console.log('Inside daily check');
+		console.log('formattedDate:', formattedDate);
+		console.log('lastPlayedTimestamp:', lastPlayedTimestamp);
+		console.log('lastPlayedTimestamp < formattedDate:', lastPlayedTimestamp < formattedDate);
+		if (lastPlayedTimestamp < formattedDate) {
+			console.log('Inside lastPlayedTimestamp check');
+			cardPlayable = true;
+		}
+	} else if (cardFrequency.frequency === 'weekly') {
+		const weekdays = cardFrequency.daysOfWeek;
+		weekdays.forEach((specificDay) => {
+			if (day === specificDay && lastPlayedTimestamp < formattedDate) {
+				cardPlayable = true;
+			}
+		});
+		return;
+	} else if (cardFrequency.frequency === 'monthly') {
+		const monthDays = cardFrequency.daysOfMonth;
+		monthDays.forEach((specificDay) => {
+			if (monthDay === specificDay && lastPlayedTimestamp < formattedDate) {
+				cardPlayable = true;
+			}
+		});
+		return;
+	} else if (cardFrequency.frequency === 'yearly') {
+		const specificDates = cardFrequency.specificDates;
+		specificDates.forEach((specificDate) => {
+			if (formattedDate === specificDate && lastPlayedTimestamp < formattedDate) {
+				cardPlayable = true;
+			}
+		});
+	}
+
+	if (!cardPlayable) {
+		console.log('Card is not playable');
+		return ({ error: 'Card is not playable' });
+	}
+
+	// Check if they have a Score for the current season
+	// TODO:: This is not working yet
+	let userSeasonScore = await SeasonScores.findOne({ season: CURRENT_SEASON, 'scores.user': currentUser._id });
+	console.log('userSeasonScore:', userSeasonScore);
+
+	// If they don't have a Score for the current season, create one
+	if (!userSeasonScore) {
+		userSeasonScore = new SeasonScores({
+			season: CURRENT_SEASON,
+			scores: [
+				{
+					user: currentUser._id,
+					score: cardValue,
+				},
+			],
+		});
+	} else {
+		// If they do have a Score for the current season, update it
+		userSeasonScore.scores.score += cardValue;
+	}
+
+	await userSeasonScore.save();
+
+	// Update the user's lastPlayedTimestamp for the card
+	currentUser.cards.push({ card: cardToPlayId, lastPlayedTimestamp: formattedDate });
+	await currentUser.save();
+
+	// Return the score and the image url
+	return ({ success: 'Card played successfully', score: userSeasonScore.scores.score, imageUrl: cardToPlay.image, cardValue: cardValue });
 });
 
+/*
+	Checks a couple things:
+		* Does the card exist?
+		* Does the user exist?
+		* Does someone own the card?
+*/
 async function addCard(req) {
 	const requestedId = req.body.qrCode;
 	const requestedUsername = req.body.discordUsername;
@@ -238,10 +362,10 @@ async function addCard(req) {
 	}
 
 	// If the user is not in the user database/table, add them first
-	validateAndAddUser(requestedUsername);
+	await validateAndAddUser(requestedUsername);
 
 	// If the card is in any players deck (including your own), you cannot add it to your deck
-	const cardOwned = await User.findOne({ cards: existingCard._id });
+	const cardOwned = await User.findOne({ 'cards.card': existingCard._id });
 	if (cardOwned) {
 		return ({ error: 'This card is already owned' });
 	}
@@ -266,8 +390,17 @@ async function validateAndAddUser(username) {
 
 async function addCardToUserDeck(username, card) {
 	const user = await User.findOne({ discordUsername : username });
-	user.cards.push(card._id);
+	// Get default timestamp
+	user.cards.push({ card: card._id, lastPlayedTimestamp: "01/01/1970" });
 	await user.save();
+}
+
+function formatDate(d) {
+    const day = d.getDate();
+    const month = d.getMonth() + 1; // JavaScript months are 0-based, so add 1
+    const year = d.getFullYear();
+
+    return `${month}/${day}/${year}`;
 }
 
 const port = process.env.PORT || 5000;

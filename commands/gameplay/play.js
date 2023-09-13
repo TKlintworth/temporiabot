@@ -16,13 +16,14 @@ module.exports = {
         const qrCode = await axios.post('http://localhost:5000/read-qr-code', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
         const qrCodeString = qrCode.data;
         // Check if the user has the card in their deck
-
-        const addedCard = await axios.post('http://localhost:5000/add-card', { qrCode: qrCodeString, discordUsername : username });
-        if (addedCard.data.error) {
-            await interaction.reply(`Tried to add a card to your deck but received an error: ${addedCard.data.error}`);
-        } else {
-            await interaction.reply(`Card added to ${username}'s deck.`);
+        const response = await axios.post('http://localhost:5000/play', { qrCode: qrCodeString, discordUsername : username });
+        if (!response.success) {
+            await interaction.reply(`Error: ${response.error}`);
+            return;
         }
-        
-	},
+        const cardValue = response.cardValue;
+        const cardImageUrl = response.imageUrl;
+        const userNewScore = response.score;
+        await interaction.reply(`You played a card with value ${cardValue}! Your new score is ${userNewScore}.`, { files: [cardImageUrl] });
+    },
 };
