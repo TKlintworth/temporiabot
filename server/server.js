@@ -5,14 +5,12 @@ const sharp = require('sharp');
 const multer = require('multer');
 const QRCode = require('qrcode');
 const AWS = require('aws-sdk');
-const jsQR = require('jsqr');
-const fs = require('fs');
-// const png = require('png');
-// const png = require('@stevebel/png');
+// const jsQR = require('jsqr');
+// const fs = require('fs');
 const archiver = require('archiver');
-const add = require('../commands/gameplay/add');
-let CURRENT_SEASON = 1;
+// const add = require('../commands/gameplay/add');
 
+const CURRENT_SEASON = 1;
 
 const s3 = new AWS.S3({ apiVersion: '2006-03-01',
 			accessKeyId: process.env.AWS_ACCESS_ID,
@@ -72,15 +70,6 @@ const seasonScoresSchema = new mongoose.Schema({
 	],
 });
 
-/* const scoreSchema = new mongoose.Schema({
-	user: {
-		type: mongoose.Schema.Types.ObjectId,
-		ref: 'User',
-		required: true,
-	},
-	score: Number,
-}); */
-
 const userSchema = new mongoose.Schema({
 	id: Number,
 	discordUsername: {
@@ -104,24 +93,67 @@ const userSchema = new mongoose.Schema({
 const Card = mongoose.model('Card', cardSchema);
 const User = mongoose.model('User', userSchema);
 const SeasonScores = mongoose.model('SeasonScores', seasonScoresSchema, 'season_scores');
-// const Score = mongoose.model('Score', scoreSchema);
+
+/* const Jimp = require('jimp');
+const QrCode = require('qrcode-reader');
+
+app.post('/read-qr-code', upload.single('image'), async (req, res) => {
+    Jimp.read(req.file.buffer, (err, image) => {
+        if (err) {
+            console.error(err);
+            return res.status(500).json({ error: "Failed to process the image." });
+        }
+
+        const qr = new QrCode();
+        qr.callback = (err, value) => {
+            if (err) {
+                console.error(err);
+                return res.status(500).json({ error: "Failed to read QR code with the first method. Trying another..." });
+            }
+
+            res.json({ data: value.result });
+        };
+        qr.decode(image.bitmap);
+    });
+}); */
 
 // Endpoint to retrieve an image from a url and read the qr code
-app.post('/read-qr-code', upload.single('image'), async (req, res) => {
+/* app.post('/read-qr-code', upload.single('image'), async (req, res) => {
 	// console.log('req', req);
-	const imageBuffer = await sharp(req.file.buffer).ensureAlpha().raw().toBuffer();
+	try {
+		const { data, info } = await sharp(req.file.buffer).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+		await sharp(req.file.buffer)
+				.resize({ width: 1000 })
+				.removeAlpha()
+				.toFile('processed_image.png');
+		console.log("Buffer Data:", data.slice(0, 10));
+		console.log("Image Info:", info);
+		const clampedArray = new Uint8ClampedArray(data);
+		console.log(clampedArray.length === 4 * info.width * info.height);
+		const qrCode = await jsQR(clampedArray, info.width, info.height);
+		console.log('qrCode:', qrCode);
 
-	// Convert the image buffer to a Uint8ClampedArray
-	const clampedArray = new Uint8ClampedArray(imageBuffer);
-	// const imageBuffer = await sharp(req.body.image).toBuffer();
-	const dimensions = await sharp(req.file.buffer).metadata();
-	const width = dimensions.width;
-	const height = dimensions.height;
-	console.log('dimensions:', dimensions);
-	const qrCode = await jsQR(clampedArray, width, height);
-	console.log('qrCode:', qrCode);
-	res.send(qrCode.data ? qrCode.data : 'QR code not found');
-});
+		return;
+		const imageBuffer = await sharp(req.file.buffer).ensureAlpha().raw().toBuffer();
+		const dimensions = await sharp(req.file.buffer).metadata();
+		const width = dimensions.width;
+		const height = dimensions.height;
+		// const clampedArray = new Uint8ClampedArray(imageBuffer);
+
+		// const qrCode = await jsQR(clampedArray, width, height);
+		console.log('qrCode:', qrCode);
+
+		if (qrCode && qrCode.data) {
+			// res.send(qrCode.data ? qrCode.data : 'QR code not found');
+			res.json({ data: qrCode.data });
+		} else {
+			throw new Error({ error: 'Failed to read QR code from the image. Please try again and make sure the QR code is well lit and visible.' });
+		}
+	} catch (error) {
+		console.error(error);
+		res.status(500).json({ error: error.message || "Failed to read QR code from the image. Please try again and make sure the QR code is well lit and visible." });
+	}
+}); */
 
 // GET endpoint to fetch all cards
 app.get('/cards', async (req, res) => {
@@ -150,7 +182,6 @@ app.get('/get-card-id', async (req, res) => {
 	const highestCardId = highestCard ? highestCard.cardId : null;
 	if (highestCardId === null) {
 		res.send({ cardId: 0 });
-		//return res.status(500).send({ error: 'No cards found' });
 	} else {
 		res.send({ cardId: highestCardId });
 	}
@@ -228,7 +259,7 @@ app.get('/download-images', async (req, res) => {
 	zip.finalize();
 });
 
-app.post('/play', async (req) => {
+app.post('/play', async (req, res) => {
 	// Check user and card existence and ownership
 	await addCard(req);
 
@@ -239,10 +270,14 @@ app.post('/play', async (req) => {
 	const splitId = requestedCardQrCode.split('_');
 	const season = parseInt(splitId[0]);
 	const cardId = parseInt(splitId[1]);
+	console.log('season:', season);
+	console.log('cardId:', cardId);
 
 	const currentUser = await User.findOne({ discordUsername : requestedUsername });
+	console.log('currentUser:', currentUser);
 	// Grab the dates that the card is allowed to be played
 	const cardToPlay = await Card.findOne({ cardId : cardId, season: season });
+	console.log('cardToPlay:', cardToPlay);
 	const cardToPlayId = cardToPlay._id;
 	const cardFrequency = cardToPlay.frequency;
 	// Get the score value of the card
@@ -265,6 +300,7 @@ app.post('/play', async (req) => {
 	// const lastPlayedTimestamp = currentUser.cardToPlayId.lastPlayedTimestamp;
 	let lastPlayedTimestamp;
 	currentUser.cards.forEach((card) => {
+		console.log('card.card:', card.card);
 		if (card.card.equals(cardToPlayId)) {
 			lastPlayedTimestamp = card.lastPlayedTimestamp;
 		}
@@ -287,7 +323,6 @@ app.post('/play', async (req) => {
 				cardPlayable = true;
 			}
 		});
-		return;
 	} else if (cardFrequency.frequency === 'monthly') {
 		const monthDays = cardFrequency.daysOfMonth;
 		monthDays.forEach((specificDay) => {
@@ -295,7 +330,6 @@ app.post('/play', async (req) => {
 				cardPlayable = true;
 			}
 		});
-		return;
 	} else if (cardFrequency.frequency === 'yearly') {
 		const specificDates = cardFrequency.specificDates;
 		specificDates.forEach((specificDate) => {
@@ -307,38 +341,60 @@ app.post('/play', async (req) => {
 
 	if (!cardPlayable) {
 		console.log('Card is not playable');
-		return ({ error: 'Card is not playable' });
+		return res.send({ error: 'Card is not playable' });
+	}
+
+	// Check if there is a SeasonScores object for the current season overall
+	// ie this is the first time someone is playing a card in the current season
+	let currentSeasonScores = await SeasonScores.findOne({ season: CURRENT_SEASON });
+	console.log('currentSeasonScores:', currentSeasonScores);
+	if (!currentSeasonScores) {
+		currentSeasonScores = new SeasonScores({
+			season: CURRENT_SEASON,
+			scores: [],
+		});
+		await currentSeasonScores.save();
 	}
 
 	// Check if they have a Score for the current season
-	// TODO:: This is not working yet
-	let userSeasonScore = await SeasonScores.findOne({ season: CURRENT_SEASON, 'scores.user': currentUser._id });
+	// ie this is the first time they are playing a card in the current season
+	const userSeasonScore = await SeasonScores.findOne({ season: CURRENT_SEASON, 'scores.user': currentUser._id });
+	let updatedScore;
 	console.log('userSeasonScore:', userSeasonScore);
 
-	// If they don't have a Score for the current season, create one
 	if (!userSeasonScore) {
-		userSeasonScore = new SeasonScores({
-			season: CURRENT_SEASON,
-			scores: [
-				{
-					user: currentUser._id,
-					score: cardValue,
-				},
-			],
-		});
+		const newScore = {
+			user: currentUser._id,
+			score: cardValue,
+		};
+		currentSeasonScores.scores.push(newScore);
+		updatedScore = cardValue;
+		await currentSeasonScores.save();
+		// userSeasonScore = await SeasonScores.findOne({ season: CURRENT_SEASON, 'scores.user': currentUser._id });
+		// console.log('userSeasonScore:', userSeasonScore);
 	} else {
 		// If they do have a Score for the current season, update it
-		userSeasonScore.scores.score += cardValue;
+		currentSeasonScores.scores.forEach((score) => {
+			if (score.user.equals(currentUser._id)) {
+				score.score += cardValue;
+				updatedScore = score.score;
+			}
+		});
+		await currentSeasonScores.save();
 	}
 
-	await userSeasonScore.save();
-
 	// Update the user's lastPlayedTimestamp for the card
-	currentUser.cards.push({ card: cardToPlayId, lastPlayedTimestamp: formattedDate });
+	currentUser.cards.forEach((card) => {
+		if (card.card.equals(cardToPlayId)) {
+			card.lastPlayedTimestamp = formattedDate;
+		}
+	});
 	await currentUser.save();
 
 	// Return the score and the image url
-	return ({ success: 'Card played successfully', score: userSeasonScore.scores.score, imageUrl: cardToPlay.image, cardValue: cardValue });
+	return res.send({ success: true, score: updatedScore, imageUrl: cardToPlay.image, cardValue: cardValue, cardName: cardToPlay.name });
+	// return { success: 'Card played successfully', score: updatedScore, imageUrl: cardToPlay.image, cardValue: cardValue };
+	// return ({ success: 'Card played successfully', score: updatedScore, imageUrl: cardToPlay.image, cardValue: cardValue });
 });
 
 /*
@@ -371,7 +427,7 @@ async function addCard(req) {
 	}
 
 	// Add the card to the user's deck
-	addCardToUserDeck(requestedUsername, existingCard);
+	await addCardToUserDeck(requestedUsername, existingCard);
 
 	return ({ success: 'Card added to deck' });
 }
@@ -395,13 +451,13 @@ async function addCardToUserDeck(username, card) {
 	await user.save();
 }
 
-function formatDate(d) {
+/* function formatDate(d) {
     const day = d.getDate();
     const month = d.getMonth() + 1; // JavaScript months are 0-based, so add 1
     const year = d.getFullYear();
 
     return `${month}/${day}/${year}`;
-}
+} */
 
 const port = process.env.PORT || 5000;
 app.listen(port, () => console.log(`Server running on port ${port}`));
